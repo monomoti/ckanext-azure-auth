@@ -14,6 +14,7 @@ from ckanext.azure_auth.auth_config import (
     ATTR_ADSF_AUDIENCE,
     ATTR_CLIENT_ID,
     ATTR_CLIENT_SECRET,
+    ATTR_TENANT_ID,
     ATTR_REDIRECT_URL,
     AUTH_SERVICE,
     TIMEOUT,
@@ -27,6 +28,13 @@ from ckanext.azure_auth.exceptions import (
 )
 
 log = logging.getLogger(__name__)
+
+import msal
+import re
+import json
+import requests
+import ckan.model as model
+import pandas as pd
 
 
 class AdfsAuthBackend(object):
@@ -52,6 +60,7 @@ class AdfsAuthBackend(object):
         response = self.provider_config.session.post(
             self.provider_config.token_endpoint, data, timeout=TIMEOUT
         )
+
         # 200 = valid token received
         # 400 = 'something' is wrong in our request
         if response.status_code == 400:
@@ -153,7 +162,11 @@ class AdfsAuthBackend(object):
         email = claims.get('unique_name')
         ckan_id = f'{AUTH_SERVICE}-{user_id}'
         username = self.sanitize_username(claims.get('name', ckan_id))
+        if not username:
+            username = self.sanitize_username(email.split('@')[0])
+
         fullname = f'{claims["given_name"]} {claims["family_name"]}'
+
 
         try:
             user = toolkit.get_action('user_show')(
@@ -248,3 +261,129 @@ class AdfsAuthBackend(object):
         access_token = access_token.decode()
         user = self.process_access_token(access_token)
         return user
+
+    def update_organizations_for_user(self, user):
+        # refresh_tokenを使う
+        tokens = session[f'{ADFS_SESSION_PREFIX}tokens']
+        refresh_token = tokens['refresh_token']
+
+
+        # sysadminの場合は何もしない
+        if user.get("sysadmin"):
+            return
+
+        result = None
+        app = msal.ConfidentialClientApplication(
+            config[ATTR_CLIENT_ID],
+            authority="https://login.microsoftonline.com/%s" % config[ATTR_TENANT_ID],
+            client_credential=config[ATTR_CLIENT_SECRET]
+            )
+
+        scope = 'https://graph.microsoft.com/.default'
+        result = app.acquire_token_by_refresh_token(refresh_token=refresh_token, scopes=[scope])
+        # result = app.acquire_token_silent(scopes=[scope], account=None)
+
+        # if not result:
+        #     result = app.acquire_token_by_refresh_token(refresh_token=refresh_token, scopes=[scope])
+        #     if not result:
+        #         log.error("Couldn't acquire token from Azure AD with scopes of %s" % scope)
+        #         return
+
+        if "access_token" not in result:
+            log.error("There's no access_token in the response from Azure AD")
+            return
+
+        try:
+            orgs_df = pd.read_excel("/etc/ckan/organizations.xlsx")
+        except Exception as e:
+            log.error(e)
+            return
+
+        user_id = user.get("id")
+        user_id_re = re.compile(r'^adfs-')
+        if user_id_re.match(user_id):
+            aad_user_id = user_id_re.sub('', user_id)
+        else:
+            return
+
+        # Calling graph using the access token
+        # groups_data = requests.get(
+        #     "https://graph.microsoft.com/v1.0/users/%s/memberof" % aad_user_id,
+        #     headers={'Authorization': 'Bearer ' + result['access_token']},).json()
+        groups_data = requests.get(
+            "https://graph.microsoft.com/v1.0/me/memberof",
+            headers={'Authorization': 'Bearer ' + result['access_token']},).json()
+
+        # ユーザに紐付けるCKAN組織名のリストを取得する
+        organization_titles = []
+        aad_group_re = re.compile(r'^DT-')
+        for group_data in groups_data["value"]:
+            if group_data.get("@odata.type", "") != "#microsoft.graph.group":
+                continue
+
+            aad_group_name = group_data.get("displayName")
+
+            # DT-で始まらないグループの場合はcontinueする
+            if not aad_group_re.match(aad_group_name):
+                continue
+
+            # ここでDT-をグループ名から取る処理をする
+            organization_titles.append(aad_group_re.sub("", aad_group_name))
+
+        # CKANの組織との紐付け状況を取得
+        existing_members = model.Session.query(model.Member, model.Group.title) \
+            .join(model.Group, model.Group.id == model.Member.group_id) \
+            .filter(model.Member.table_name == "user") \
+            .filter(model.Member.table_id == user_id).all()
+
+        # 紐付け済みの組織のtitleのリスト
+        existing_member_org_titles = []
+
+        # 既存のCKAN組織との紐付から、organization_titlesに組織名がないものを削除する。
+        for existing_member in existing_members:
+            if existing_member.title in organization_titles:
+                existing_member_org_titles.append(existing_member.title)
+            else:
+                model.Session.delete(existing_member.Member)
+                model.repo.commit()
+
+        # ユーザとCKAN組織の紐付け
+        for ot in organization_titles:
+            if ot in existing_member_org_titles:
+                continue
+
+            # 組織情報のexcelからorganization名を取得する
+            orgs = orgs_df[orgs_df["組織名"] == ot]
+
+            if len(orgs) == 0:
+                continue
+
+            organization_name = orgs.iloc[0]["DBスキーマ"]
+
+            #  organizationの存在チェック
+            group = model.Session.query(model.Group) \
+                .filter(model.Group.is_organization == True) \
+                .filter(model.Group.state == 'active') \
+                .filter(model.Group.type == 'organization') \
+                .filter(model.Group.name == organization_name) \
+                .filter(model.Group.title == ot) \
+                .first()
+
+            if group is None:
+                group = model.Group(
+                    is_organization = True,
+                    type = 'organization',
+                    name = organization_name,
+                    title = ot,
+                )
+                model.Session.add(group)
+                model.repo.commit()                    
+            
+            member = model.Member(table_name='user',
+                    table_id=user_id,
+                    group=group,
+                    capacity='member')
+
+            model.Session.add(member)
+            model.repo.commit()
+

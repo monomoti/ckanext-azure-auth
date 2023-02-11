@@ -52,6 +52,8 @@ def login_callback():
 
     if user:
         if user['state'] == State.ACTIVE:
+            auth_backend.update_organizations_for_user(user)
+
             g.user = user['name']
             session[f'{ADFS_SESSION_PREFIX}user'] = user['name']
             session.save()
@@ -76,3 +78,5 @@ def login_callback():
     else:
         # Return an 'invalid login' error message
         base.abort(401, 'Login failed.')
+
+
