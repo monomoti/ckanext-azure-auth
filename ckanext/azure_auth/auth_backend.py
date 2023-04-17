@@ -263,11 +263,6 @@ class AdfsAuthBackend(object):
         return user
 
     def update_organizations_for_user(self, user):
-        # refresh_tokenを使う
-        tokens = session[f'{ADFS_SESSION_PREFIX}tokens']
-        refresh_token = tokens['refresh_token']
-
-
         # sysadminの場合は何もしない
         if user.get("sysadmin"):
             return
@@ -280,14 +275,9 @@ class AdfsAuthBackend(object):
             )
 
         scope = 'https://graph.microsoft.com/.default'
-        result = app.acquire_token_by_refresh_token(refresh_token=refresh_token, scopes=[scope])
-        # result = app.acquire_token_silent(scopes=[scope], account=None)
-
-        # if not result:
-        #     result = app.acquire_token_by_refresh_token(refresh_token=refresh_token, scopes=[scope])
-        #     if not result:
-        #         log.error("Couldn't acquire token from Azure AD with scopes of %s" % scope)
-        #         return
+        result = app.acquire_token_silent(scopes=[scope], account=None)
+        if not result:
+            result = app.acquire_token_for_client(scopes=[scope])
 
         if "access_token" not in result:
             log.error("There's no access_token in the response from Azure AD")
@@ -307,11 +297,8 @@ class AdfsAuthBackend(object):
             return
 
         # Calling graph using the access token
-        # groups_data = requests.get(
-        #     "https://graph.microsoft.com/v1.0/users/%s/memberof" % aad_user_id,
-        #     headers={'Authorization': 'Bearer ' + result['access_token']},).json()
         groups_data = requests.get(
-            "https://graph.microsoft.com/v1.0/me/memberof",
+            "https://graph.microsoft.com/v1.0/users/%s/memberof" % aad_user_id,
             headers={'Authorization': 'Bearer ' + result['access_token']},).json()
 
         # ユーザに紐付けるCKAN組織名のリストを取得する
