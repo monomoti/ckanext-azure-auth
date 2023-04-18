@@ -9,6 +9,7 @@ import ckan.plugins.toolkit as toolkit
 from typing import Any
 import jwt
 from .aadtoken import get_public_key
+from ckanext.azure_auth.cli import get_commands
 
 
 from ckanext.azure_auth.auth_config import (
@@ -49,6 +50,7 @@ class AzureAuthPlugin(plugins.SingletonPlugin):
     plugins.implements(plugins.ITemplateHelpers)
     plugins.implements(plugins.IAuthenticator)
     plugins.implements(plugins.IApiToken, inherit=True)
+    plugins.implements(plugins.IClick)
 
     def update_config(self, config):
         '''
@@ -200,3 +202,7 @@ class AzureAuthPlugin(plugins.SingletonPlugin):
                             issuer=issuer)
 
         return decoded
+
+    # IClick
+    def get_commands(self):
+        return get_commands()
