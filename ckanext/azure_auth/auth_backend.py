@@ -262,7 +262,7 @@ class AdfsAuthBackend(object):
         user = self.process_access_token(access_token)
         return user
 
-    def update_organizations_for_user(self, user):
+    def update_organizations_for_user(self, user, groups_data=None):
         # sysadminの場合は何もしない
         if user.get("sysadmin"):
             return
@@ -297,9 +297,10 @@ class AdfsAuthBackend(object):
             return
 
         # Calling graph using the access token
-        groups_data = requests.get(
-            "https://graph.microsoft.com/v1.0/users/%s/memberof" % aad_user_id,
-            headers={'Authorization': 'Bearer ' + result['access_token']},).json()
+        if not groups_data:
+            groups_data = requests.get(
+                "https://graph.microsoft.com/v1.0/users/%s/memberof" % aad_user_id,
+                headers={'Authorization': 'Bearer ' + result['access_token']},).json()
 
         # ユーザに紐付けるCKAN組織名のリストを取得する
         organization_titles = []
@@ -318,7 +319,7 @@ class AdfsAuthBackend(object):
             organization_titles.append(aad_group_re.sub("", aad_group_name))
 
         # CKANの組織との紐付け状況を取得
-        existing_members = model.Session.query(model.Member, model.Group.title) \
+        existing_members = model.Session.query(model.Member, model.Group) \
             .join(model.Group, model.Group.id == model.Member.group_id) \
             .filter(model.Member.table_name == "user") \
             .filter(model.Member.table_id == user_id).all()
@@ -328,8 +329,12 @@ class AdfsAuthBackend(object):
 
         # 既存のCKAN組織との紐付から、organization_titlesに組織名がないものを削除する。
         for existing_member in existing_members:
-            if existing_member.title in organization_titles:
-                existing_member_org_titles.append(existing_member.title)
+            if existing_member.Group.title in organization_titles:
+                # アクティブでなければアクティブにする
+                if existing_member.Group.state != 'active':
+                    existing_member.Group.state = 'active'
+                    model.repo.commit()
+                existing_member_org_titles.append(existing_member.Group.title)
             else:
                 model.Session.delete(existing_member.Member)
                 model.repo.commit()
@@ -350,7 +355,6 @@ class AdfsAuthBackend(object):
             #  organizationの存在チェック
             group = model.Session.query(model.Group) \
                 .filter(model.Group.is_organization == True) \
-                .filter(model.Group.state == 'active') \
                 .filter(model.Group.type == 'organization') \
                 .filter(model.Group.name == organization_name) \
                 .filter(model.Group.title == ot) \
@@ -364,7 +368,12 @@ class AdfsAuthBackend(object):
                     title = ot,
                 )
                 model.Session.add(group)
-                model.repo.commit()                    
+                model.repo.commit()
+
+            # アクティブでなければアクティブにする
+            if group.state != 'active':
+                group.state = 'active'
+                model.repo.commit()
             
             member = model.Member(table_name='user',
                     table_id=user_id,
