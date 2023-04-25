@@ -334,6 +334,9 @@ class AdfsAuthBackend(object):
                 if existing_member.Group.state != 'active':
                     existing_member.Group.state = 'active'
                     model.repo.commit()
+                if existing_member.Member.state != 'active':
+                    existing_member.Member.state = 'active'
+                    model.repo.commit()
                 existing_member_org_titles.append(existing_member.Group.title)
             else:
                 model.Session.delete(existing_member.Member)
