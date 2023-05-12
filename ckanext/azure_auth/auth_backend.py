@@ -429,6 +429,24 @@ class AdfsAuthBackend(object):
 
                 organization_name = orgs.iloc[0]["DBスキーマ"]
 
+                # グループのメンバーを取得
+                next_members_url="https://graph.microsoft.com/v1.0/groups/%s/members" % group_data["id"]
+
+                members_data = []                
+                while next_members_url:
+                    md = requests.get(
+                        next_members_url,
+                        headers={'Authorization': 'Bearer ' + token_result['access_token']}
+                    ).json()
+
+                    members_data.extend(md["value"])
+
+                    next_members_url=md.get("@odata.nextLink")
+
+                # メンバーがいないセキュリティグループは無視する
+                if len(members_data) == 0:
+                    continue
+
                 #  organizationの存在チェック
                 group = model.Session.query(model.Group) \
                     .filter(model.Group.is_organization == True) \
@@ -452,19 +470,6 @@ class AdfsAuthBackend(object):
                     group.state = 'active'
                     model.repo.commit()
 
-                # グループのメンバーを取得
-                next_members_url="https://graph.microsoft.com/v1.0/groups/%s/members" % group_data["id"]
-
-                members_data = []                
-                while next_members_url:
-                    md = requests.get(
-                        next_members_url,
-                        headers={'Authorization': 'Bearer ' + token_result['access_token']}
-                    ).json()
-
-                    members_data.extend(md["value"])
-
-                    next_members_url=md.get("@odata.nextLink")
 
                 # CKAN組織に所属すべきユーザIDのリスト
                 member_ckan_ids = [f'{AUTH_SERVICE}-{x["id"]}' for x in members_data]
