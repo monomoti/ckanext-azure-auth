@@ -52,7 +52,8 @@ def login_callback():
 
     if user:
         if user['state'] == State.ACTIVE:
-            auth_backend.update_organizations_for_user(user)
+            # Azure ADのセキュリティグループによるCKAN組織の作成、ユーザとの紐付けは行わない
+            # auth_backend.update_organizations_for_user(user)
 
             g.user = user['name']
             session[f'{ADFS_SESSION_PREFIX}user'] = user['name']

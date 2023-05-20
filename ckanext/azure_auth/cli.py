@@ -21,6 +21,7 @@ from ckanext.azure_auth.auth_config import (
 )
 from ckan.logic import NotFound
 
+
 def get_commands():
     return [azure_auth]
 
@@ -29,12 +30,20 @@ def azure_auth():
     pass
 
 
-@azure_auth.command(short_help=u"Update relations between users and organizations.")
+@azure_auth.command(short_help=u"Update users using Azure AD users.")
 def update_users():
     provider_config = ProviderConfig()
     auth_backend = AdfsAuthBackend(provider_config=provider_config)
 
-    auth_backend.update_users_for_organization()
+    auth_backend.update_users()
+
+@azure_auth.command(short_help=u"Update organizations using organization excel file.")
+def update_organizations():
+    provider_config = ProviderConfig()
+    auth_backend = AdfsAuthBackend(provider_config=provider_config)
+
+    auth_backend.update_organizations()
+
 
 
 
