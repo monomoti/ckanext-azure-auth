@@ -387,6 +387,127 @@ class AdfsAuthBackend(object):
             model.repo.commit()
 
 
+    def update_users(self):
+        app = msal.ConfidentialClientApplication(
+            config[ATTR_CLIENT_ID],
+            authority="https://login.microsoftonline.com/%s" % config[ATTR_TENANT_ID],
+            client_credential=config[ATTR_CLIENT_SECRET]
+            )
+
+        scope = 'https://graph.microsoft.com/.default'
+        token_result = app.acquire_token_for_client(scopes=[scope])
+        if not token_result:
+            token_result = app.acquire_token_for_client(scopes=[scope])
+
+        if "access_token" not in token_result:
+            log.error("There's no access_token in the response from Azure AD")
+            return
+        
+        next_groups_url="https://graph.microsoft.com/v1.0/groups?$filter=startswith(displayName,'DT-')"
+
+        while next_groups_url:
+            groups_data = requests.get(
+                next_groups_url,
+                headers={'Authorization': 'Bearer ' + token_result['access_token']},).json()
+            
+            for group_data in groups_data["value"]:
+
+                # print(group_data["displayName"])
+
+                # グループのメンバーを取得
+                next_members_url="https://graph.microsoft.com/v1.0/groups/%s/members" % group_data["id"]
+
+                members_data = []                
+                while next_members_url:
+                    md = requests.get(
+                        next_members_url,
+                        headers={'Authorization': 'Bearer ' + token_result['access_token']}
+                    ).json()
+
+                    members_data.extend(md["value"])
+
+                    next_members_url=md.get("@odata.nextLink")
+
+                # メンバーがいないセキュリティグループは無視する
+                if len(members_data) == 0:
+                    continue
+                
+                # CKANユーザの作成
+                for member_data in members_data:
+                    ckan_id = f'{AUTH_SERVICE}-{member_data["id"]}'
+                    email = member_data["userPrincipalName"]
+
+                    print("%s %s" % (member_data.get('displayName'), email))
+
+                    username = self.sanitize_username(member_data.get('displayName', ckan_id))
+
+                    if not username:
+                        username = self.sanitize_username(email.split('@')[0])
+
+
+                    fullname = f'{member_data["givenName"]} {member_data["surname"]}'
+
+
+                    try:
+                        user = toolkit.get_action('user_show')(
+                            context={'ignore_auth': True},
+                            data_dict={'id': ckan_id}
+                        )
+                    except NotFound:
+                        user = toolkit.get_action('user_create')(
+                            context={'ignore_auth': True, 'user': username},
+                            data_dict={
+                                'id': ckan_id,
+                                'name': username,
+                                'fullname': fullname,
+                                'password': str(uuid.uuid4()),
+                                'email': email,
+                                'plugin_extras': {
+                                    'azure_auth':  member_data["id"],
+                                }
+                            },
+                        )
+                                
+            next_groups_url = groups_data.get("@odata.nextLink")
+
+
+    def update_organizations(self):
+        try:
+            orgs_df = pd.read_excel("/etc/ckan/organizations.xlsx")
+        except Exception as e:
+            log.error(e)
+            return
+        
+        orgs_df = orgs_df[(orgs_df["組織名"].isnull() == False) & (orgs_df["DBスキーマ"].isnull() == False)]
+        
+        for o_index in orgs_df.index:
+            org = orgs_df.loc[o_index]
+
+            #  organizationの存在チェック
+            group = model.Session.query(model.Group) \
+                .filter(model.Group.is_organization == True) \
+                .filter(model.Group.type == 'organization') \
+                .filter(model.Group.name == org["DBスキーマ"]) \
+                .filter(model.Group.title == org["組織名"]) \
+                .first()
+
+            if group is None:
+                group = model.Group(
+                    is_organization = True,
+                    type = 'organization',
+                    name = org["DBスキーマ"],
+                    title = org["組織名"],
+                )
+                model.Session.add(group)
+                model.repo.commit()
+
+            # アクティブでなければアクティブにする
+            if group.state != 'active':
+                group.state = 'active'
+                model.repo.commit()
+
+    
+
     def update_users_for_organization(self):
         aad_group_re = re.compile(r'^DT-')
 
