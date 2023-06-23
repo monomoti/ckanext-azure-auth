@@ -5,7 +5,10 @@
   <link rel="stylesheet" href="/css/azure-auth.css" />
 {% endblock %}
 
-{% block primary_content %}
+
+{% block primary %}
+<div class="primary col-sm-12 col-xs-12" role="main">
+  {% block primary_content %}
   <section class="module">
     <div class="module-content">
       <h1 class="page-heading">{% block page_heading %}{{ _('Login') }}{% endblock %}</h1>
@@ -34,3 +37,10 @@
     </div>
   </section>
 {% endblock %}
+</div>
+{% endblock %}
+
+
+{% block secondary %}
+{% endblock %}
+
