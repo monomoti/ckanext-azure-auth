@@ -441,7 +441,7 @@ class AdfsAuthBackend(object):
 
                     username = self.sanitize_username(member_data.get('displayName', ckan_id))
 
-                    if not username:
+                    if not username or len(username) < 2:
                         username = self.sanitize_username(email.split('@')[0])
 
 
