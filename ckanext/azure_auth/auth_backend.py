@@ -453,6 +453,12 @@ class AdfsAuthBackend(object):
                             context={'ignore_auth': True},
                             data_dict={'id': ckan_id}
                         )
+                        # ユーザがactiveでなければactiveにする
+                        if user['state'] != 'active':
+                            user_obj = model.User.get(ckan_id)
+                            user_obj.state = 'active'
+                            model.repo.commit()
+
                     except NotFound:
                         user = toolkit.get_action('user_create')(
                             context={'ignore_auth': True, 'user': username},
