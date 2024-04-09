@@ -193,7 +193,7 @@ class AzureAuthPlugin(plugins.SingletonPlugin):
 
         issuer = 'https://sts.windows.net/{tenant_id}/'.format(tenant_id=tenant_id)
 
-        public_key = get_public_key(encoded)
+        public_key = get_public_key(encoded, tenant_id)
         decoded = jwt.decode(encoded,
                             public_key,
                             verify=True,
