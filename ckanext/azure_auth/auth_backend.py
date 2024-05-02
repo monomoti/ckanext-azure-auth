@@ -89,7 +89,7 @@ class AdfsAuthBackend(object):
         session.save()
         return adfs_response
 
-    def validate_access_token(self, access_token):
+    def validate_access_token(self, access_token, api=False):
         for idx, key in enumerate(self.provider_config.signing_keys):
             try:
                 # Explicitly define the verification option.
@@ -112,7 +112,7 @@ class AdfsAuthBackend(object):
                     access_token,
                     key=key,
                     algorithms=['RS256', 'RS384', 'RS512'],
-                    audience=config[ATTR_ADSF_AUDIENCE],
+                    audience=config[ATTR_ADSF_AUDIENCE] if not api else f'api://{config[ATTR_ADSF_AUDIENCE]}',
                     issuer=self.provider_config.issuer,
                     options=options,
                     leeway=config['ckanext.azure_auth.jwt_leeway'],

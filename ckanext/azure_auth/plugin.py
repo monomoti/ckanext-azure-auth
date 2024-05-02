@@ -10,7 +10,7 @@ from typing import Any
 import jwt
 from .aadtoken import get_public_key
 from ckanext.azure_auth.cli import get_commands
-
+from ckanext.azure_auth.auth_backend import AdfsAuthBackend
 
 from ckanext.azure_auth.auth_config import (
     AUTH_SERVICE,
@@ -187,21 +187,13 @@ class AzureAuthPlugin(plugins.SingletonPlugin):
     # IApiToken
     def decode_api_token(
         self, encoded: str, **kwargs: Any) -> Any:
+    
+        provider_config = ProviderConfig()
+        provider_config.load_config()
+        auth_backend = AdfsAuthBackend(provider_config=provider_config)
 
-        client_id = f'api://{ckan_config[ATTR_CLIENT_ID]}'
-        tenant_id = ckan_config[ATTR_TENANT_ID]
+        return auth_backend.validate_access_token(encoded, api=True)
 
-        issuer = 'https://sts.windows.net/{tenant_id}/'.format(tenant_id=tenant_id)
-
-        public_key = get_public_key(encoded, tenant_id)
-        decoded = jwt.decode(encoded,
-                            public_key,
-                            verify=True,
-                            algorithms=['RS256'],
-                            audience=[client_id],
-                            issuer=issuer)
-
-        return decoded
 
     # IClick
     def get_commands(self):
